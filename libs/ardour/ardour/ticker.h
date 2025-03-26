@@ -58,6 +58,7 @@ private:
 
 	void   reset ();
 	void   resync_latency (bool);
+	void   set_position (samplepos_t transport_position);
 	double one_ppqn_in_samples (samplepos_t transport_position) const;
 
 	void send_midi_clock_event (pframes_t offset, pframes_t nframes);

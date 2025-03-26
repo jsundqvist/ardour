@@ -22,6 +22,8 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include <iostream>
+
 #include "pbd/compose.h"
 
 #include "evoral/midi_events.h"
@@ -36,6 +38,7 @@
 #include "ardour/tempo.h"
 #include "ardour/ticker.h"
 
+using namespace std;
 using namespace ARDOUR;
 using namespace PBD;
 using namespace Temporal;
@@ -78,12 +81,83 @@ MidiClockTicker::resync_latency (bool playback)
 	DEBUG_TRACE (DEBUG::MidiClock, string_compose ("resync latency: %1\n", _mclk_out_latency.max));
 }
 
+void 
+MidiClockTicker::set_position (samplepos_t transport_position) {
+	uint32_t    beat_pos;
+	samplepos_t clk_pos;
+	Temporal::TempoMap::use()->midi_clock_beat_at_or_after (transport_position, clk_pos, beat_pos);
+
+	cout << "Position " << beat_pos << endl;
+	send_position_event(beat_pos, _next_tick, _session.get_block_size());
+
+	_beat_pos = beat_pos;
+	_next_tick = clk_pos;
+	_transport_pos = transport_position;
+}
+
 void
 MidiClockTicker::tick (samplepos_t start_sample, samplepos_t end_sample, pframes_t n_samples, samplecnt_t pre_roll)
 {
 	/* silence buffer */
 	_midi_port->cycle_start (n_samples);
 
+	samplecnt_t length = end_sample - start_sample;
+
+	Location* loop = _session.locations()->auto_loop_location();
+	bool is_loop_wrap = loop && end_sample < start_sample;
+	if (is_loop_wrap) {
+		samplecnt_t loop_end_length = loop->end_sample() - start_sample;
+		samplecnt_t loop_start_length = end_sample - loop->start_sample();
+		length = (loop_end_length + loop_start_length);
+	}
+
+	pframes_t block_size = _session.get_block_size();
+
+	if (!_rolling) {
+		if (length == block_size) {
+			if (loop || start_sample == 0) {
+				cout << "Start" << endl;
+				send_start_event(0, n_samples);
+			} else {
+				cout << "Continue" << endl;
+				send_continue_event(0, n_samples);
+			}
+		} else if (length > 0) {
+			set_position(end_sample);
+		}
+	} else if (length == 0) {
+		cout << "Stop" << endl;
+		send_stop_event(0, n_samples);
+		if (_session.config.get_auto_return()) {
+			set_position(_session.last_transport_start());
+		}
+	}
+	_rolling = (length == block_size);
+
+	if (!_rolling) {
+		goto out;
+	}
+
+	while ((_next_tick >= start_sample && _next_tick < end_sample)
+			|| (is_loop_wrap && (_next_tick >= start_sample || _next_tick < end_sample))) {
+		DEBUG_TRACE (DEBUG::MidiClock, string_compose ("Tick @ %1 cycle: %2 .. %3 nsamples: %4, ticker-pos: %5\n",
+		                                               _next_tick, start_sample, end_sample, n_samples, _transport_pos));
+		send_midi_clock_event (_next_tick - start_sample, n_samples);
+		if (++_clock_cnt == 6) {
+			_clock_cnt = 0;
+			++_beat_pos;
+		}
+		_next_tick += one_ppqn_in_samples (llrint (_next_tick));
+
+		if (is_loop_wrap) {
+			samplecnt_t loop_end_delta = _next_tick - loop->end_sample();
+			if (loop_end_delta >= 0) {
+				_next_tick = loop->start_sample() + loop_end_delta;
+			}
+		}
+	}
+
+/*
 	double speed = (end_sample - start_sample) / (double)n_samples;
 
 	Location* loop = _session.locations()->auto_loop_location();
@@ -94,7 +168,7 @@ MidiClockTicker::tick (samplepos_t start_sample, samplepos_t end_sample, pframes
 		speed = (loop_end_length + loop_start_length) / (double)n_samples;
 	}
 
-	if (!Config->get_send_midi_clock () /*|| !TransportMasterManager::instance().current()*/) {
+	if (!Config->get_send_midi_clock ()) {
 		if (_rolling) {
 			send_stop_event (0, n_samples);
 		}
@@ -103,9 +177,8 @@ MidiClockTicker::tick (samplepos_t start_sample, samplepos_t end_sample, pframes
 	}
 
 	if (speed == 0 && start_sample == 0 && end_sample == 0) {
-		/* test if pre-roll is active, special-case
-		 * "start at zero"
-		 */
+		// test if pre-roll is active, special-case
+		// "start at zero"
 
 		if (pre_roll > 0 && pre_roll >= _mclk_out_latency.max && pre_roll < _mclk_out_latency.max + n_samples) {
 			assert (!_rolling);
@@ -126,8 +199,8 @@ MidiClockTicker::tick (samplepos_t start_sample, samplepos_t end_sample, pframes
 			send_midi_clock_event (pos, n_samples);
 		}
 
-		/* Handle case _mclk_out_latency.max > one_ppqn_in_samples (0)
-		 * may need to send more than one clock */
+		// Handle case _mclk_out_latency.max > one_ppqn_in_samples (0)
+		// may need to send more than one clock
 
 		if (pre_roll > 0 && _next_tick < 0) {
 			assert (_rolling);
@@ -163,7 +236,7 @@ MidiClockTicker::tick (samplepos_t start_sample, samplepos_t end_sample, pframes
 		goto out;
 	}
 
-	/* test for discontinuity */
+	// test for discontinuity
 	if (start_sample != _transport_pos) {
 		if (_rolling) {
 			DEBUG_TRACE (DEBUG::MidiClock, string_compose ("Discontinuty start_sample: %1 ticker-pos: %2\n", start_sample, _transport_pos));
@@ -175,11 +248,13 @@ MidiClockTicker::tick (samplepos_t start_sample, samplepos_t end_sample, pframes
 
 	if (!_rolling) {
 		if (_transport_pos < 0 || _next_tick < start_sample) {
-			/* get the next downbeat */
+			// get the next downbeat
 			uint32_t    beat_pos;
 			samplepos_t clk_pos;
 
 			Temporal::TempoMap::use()->midi_clock_beat_at_or_after (start_sample + _mclk_out_latency.max, clk_pos, beat_pos);
+
+			send_start_event (0, n_samples);
 
 			_beat_pos      = beat_pos;
 			_next_tick     = clk_pos - _mclk_out_latency.max;
@@ -219,15 +294,15 @@ MidiClockTicker::tick (samplepos_t start_sample, samplepos_t end_sample, pframes
 		if (is_loop_wrap) {
 			samplecnt_t loop_end_delta = _next_tick - loop->end_sample();
 			if (loop_end_delta >= 0) {
-				_next_tick = loop->start_sample() + loop_end_delta;
+				_next_tick = loop->start_sample() + loop_end_delta - _mclk_out_latency.max;
 			}
 		}
 	}
-
+*/
 	_transport_pos = end_sample;
 
 out:
-	_midi_port->flush_buffers (n_samples);
+	//_midi_port->flush_buffers (n_samples);
 	_midi_port->cycle_end (n_samples);
 }
 
