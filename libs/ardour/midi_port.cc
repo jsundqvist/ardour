@@ -331,10 +331,12 @@ MidiPort::flush_buffers (pframes_t nframes)
 		}
 #endif
 
-		// XXX consider removing this check for optimized builds
-		// and just send 'em all, at cycle_end
-		// see AudioEngine::split_cycle (), PortManager::cycle_end()
-		if ((adjusted_time >= _global_port_buffer_offset) && (adjusted_time < _global_port_buffer_offset + nframes)) {
+		int type = (int)ev.type();
+		int note = (int)ev.note();
+		int velocity = (int)ev.velocity();
+		if(false) {
+			cout << "midi: " << type << " " << note << " " << velocity << endl;
+		} else if (true || (adjusted_time >= _global_port_buffer_offset) && (adjusted_time < _global_port_buffer_offset + nframes)) {
 			pframes_t tme = floor (adjusted_time / speed_ratio);
 			if (port_engine.midi_event_put (port_buffer, tme, ev.buffer(), ev.size()) != 0) {
 				cerr << "write failed, dropped event, time " << adjusted_time << '/' << ev.time() << endl;
