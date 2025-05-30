@@ -50,7 +50,7 @@ MidiClockTicker::MidiClockTicker (Session& s)
 	, _next_tick (0)
 	, _beat_pos (0)
 	, _clock_cnt (0)
-	, _transport_pos (-1)
+	, _transport_pos (0)
 {
 	resync_latency (true);
 	_session.LatencyUpdated.connect_same_thread (_latency_connection, boost::bind (&MidiClockTicker::resync_latency, this, _1));
@@ -93,6 +93,7 @@ MidiClockTicker::set_position (samplepos_t transport_position) {
 	_beat_pos = beat_pos;
 	_next_tick = clk_pos;
 	_transport_pos = transport_position;
+	_located = true;
 }
 
 void
@@ -103,36 +104,55 @@ MidiClockTicker::tick (samplepos_t start_sample, samplepos_t end_sample, pframes
 
 	samplecnt_t length = end_sample - start_sample;
 
+	bool is_loop = Config->get_loop_is_mode() && _session.get_play_loop();
 	Location* loop = _session.locations()->auto_loop_location();
-	bool is_loop_wrap = loop && end_sample < start_sample;
+	bool is_loop_wrap = is_loop && end_sample < start_sample;
 	if (is_loop_wrap) {
 		samplecnt_t loop_end_length = loop->end_sample() - start_sample;
 		samplecnt_t loop_start_length = end_sample - loop->start_sample();
 		length = (loop_end_length + loop_start_length);
 	}
+	samplepos_t current_start = _session.current_start_sample();
+	samplepos_t current_end = _session.current_end_sample();
+	samplepos_t last_start = _session.last_transport_start();
+	bool is_start = _located
+			|| _transport_pos <= 0
+			|| (is_loop && _transport_pos == loop->start_sample());
 
 	pframes_t block_size = _session.get_block_size();
 
-	if (!_rolling) {
-		if (length == block_size) {
-			if (loop || start_sample == 0) {
-				cout << "Start" << endl;
-				send_start_event(0, n_samples);
-			} else {
-				cout << "Continue" << endl;
-				send_continue_event(0, n_samples);
-			}
-		} else if (length > 0) {
-			set_position(end_sample);
-		}
-	} else if (length == 0) {
-		cout << "Stop" << endl;
-		send_stop_event(0, n_samples);
-		if (_session.config.get_auto_return()) {
-			set_position(_session.last_transport_start());
+	if (pre_roll > 0 && is_start) {
+		cout << "Preroll\t" << pre_roll << "\t" << n_samples << endl;
+		cout << "Latency\t" << _mclk_out_latency.min << "\t" << _mclk_out_latency.max << endl;
+		if (pre_roll == _mclk_out_latency.max) {
+			send_midi_clock_event (_next_tick - start_sample, n_samples);
 		}
 	}
-	_rolling = (length == block_size);
+
+	if (length != block_size) {
+		if (_rolling) {
+			cout << "Stop" << " " << _transport_pos << endl;
+			send_stop_event(0, n_samples);
+			_rolling = false;
+			if (_session.config.get_auto_return()) {
+				set_position(_session.last_transport_start());
+			}
+		} else if (_transport_pos != end_sample) {
+			set_position(end_sample);
+		}
+		MidiBuffer& mb (_midi_port->get_midi_buffer (n_samples));
+		mb.clear();
+	} else if (!_rolling) {
+		if (is_start) {
+			cout << "Start" << endl;
+			send_start_event(0, n_samples);
+		} else {
+			cout << "Continue" << endl;
+			send_continue_event(0, n_samples);
+		}
+		_rolling = true;
+		_located = false;
+	}
 
 	if (!_rolling) {
 		goto out;

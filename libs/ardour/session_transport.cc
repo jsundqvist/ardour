@@ -475,7 +475,7 @@ Session::start_transport (bool after_loop)
 	ENSURE_PROCESS_THREAD;
 	DEBUG_TRACE (DEBUG::Transport, "start_transport\n");
 
-	if (Config->get_loop_is_mode() && get_play_loop ()) {
+	if (config.get_auto_return() && Config->get_loop_is_mode() && get_play_loop ()) {
 
 		Location *location = _locations->auto_loop_location();
 
