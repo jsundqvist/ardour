@@ -1944,18 +1944,14 @@ ARDOUR_UI::toggle_roll (bool with_abort, bool roll_out_of_bounded_mode)
 			return;
 		}
 
-		if (_session->config.get_auto_return() && _session->get_play_loop() && Config->get_loop_is_mode()) {
-			_session->request_locate (_session->locations()->auto_loop_location()->start().samples(), false, MustRoll);
-		} else {
-			if (UIConfiguration::instance().get_follow_edits()) {
-				list<TimelineRange>& range = editor->get_selection().time;
-				if (range.front().start().samples() == _session->transport_sample()) { // if playhead is exactly at the start of a range, we assume it was placed there by follow_edits
-					_session->request_play_range (&range, true);
-					_session->set_requested_return_sample (range.front().start().samples());  //force an auto-return here
-				}
+		if (UIConfiguration::instance().get_follow_edits()) {
+			list<TimelineRange>& range = editor->get_selection().time;
+			if (range.front().start().samples() == _session->transport_sample()) { // if playhead is exactly at the start of a range, we assume it was placed there by follow_edits
+				_session->request_play_range (&range, true);
+				_session->set_requested_return_sample (range.front().start().samples());  //force an auto-return here
 			}
-			_session->request_roll ();
 		}
+		_session->request_roll ();
 	}
 }
 

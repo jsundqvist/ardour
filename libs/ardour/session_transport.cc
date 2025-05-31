@@ -291,7 +291,9 @@ Session::locate (samplepos_t target_sample, bool for_loop_end, bool force, bool 
 		send_mmc_locate (_transport_sample);
 	}
 
-	_last_roll_location = _last_roll_or_reversal_location =  _transport_sample;
+	if (!for_loop_end) {
+		_last_roll_location = _last_roll_or_reversal_location =  _transport_sample;
+	}
 	_click_iterator.invalidate ();
 
 	Located (); /* EMIT SIGNAL */
@@ -475,29 +477,13 @@ Session::start_transport (bool after_loop)
 	ENSURE_PROCESS_THREAD;
 	DEBUG_TRACE (DEBUG::Transport, "start_transport\n");
 
-	if (config.get_auto_return() && Config->get_loop_is_mode() && get_play_loop ()) {
-
-		Location *location = _locations->auto_loop_location();
-
-		if (location != 0) {
-			if (_transport_sample != location->start_sample()) {
-
-				/* force tracks to do their thing */
-				set_track_loop (true);
-
-				/* jump to start and then roll from there */
-
-				request_locate (location->start_sample(), false, MustRoll);
-				return;
-			}
-		}
-	}
-
 	if (Config->get_monitoring_model() == HardwareMonitoring) {
 		set_track_monitor_input_status (!config.get_auto_input());
 	}
 
-	_last_roll_location = _transport_sample;
+	if (!after_loop) {
+		_last_roll_location = _transport_sample;
+	}
 	_last_roll_or_reversal_location = _transport_sample;
 	if (!have_looped && !_exporting) {
 		_remaining_latency_preroll = worst_latency_preroll_buffer_size_ceil ();

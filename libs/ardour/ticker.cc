@@ -124,8 +124,7 @@ MidiClockTicker::tick (samplepos_t start_sample, samplepos_t end_sample, pframes
 	if (pre_roll > 0 && is_start) {
 		cout << "Preroll\t" << pre_roll << "\t" << n_samples << endl;
 		cout << "Latency\t" << _mclk_out_latency.min << "\t" << _mclk_out_latency.max << endl;
-
-		if (!_rolling) {
+		if (!_rolling && pre_roll == _mclk_out_latency.max) {
 			cout << "Preroll Start" << endl;
 			send_start_event(0, n_samples);
 			_rolling = true;
@@ -140,7 +139,6 @@ MidiClockTicker::tick (samplepos_t start_sample, samplepos_t end_sample, pframes
 			if (_session.config.get_auto_return()) {
 				set_position(_session.last_transport_start());
 			}
-			resync_latency(true);
 		} else if (_transport_pos != end_sample) {
 			set_position(end_sample);
 		}
