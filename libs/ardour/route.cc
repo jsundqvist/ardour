@@ -33,6 +33,8 @@
 #include "libardour-config.h"
 #endif
 
+#include <iostream>
+
 #include <cmath>
 #include <cassert>
 #include <algorithm>

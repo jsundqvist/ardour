@@ -1231,7 +1231,7 @@ Session::non_realtime_locate ()
 
 		Location *loc  = _locations->auto_loop_location();
 
-		if (!loc || (_transport_sample < loc->start().samples() || _transport_sample >= loc->end().samples())) {
+		if (!loc || (_transport_sample >= loc->end().samples())) {
 			/* jumped out of loop range: stop tracks from looping,
 			   but leave loop (mode) enabled.
 			 */
